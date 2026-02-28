@@ -9,7 +9,6 @@ fi
 # Copy directories
 cp -r /tmp/MT3000-main/etc/* /etc/
 chmod +x /etc/init.d/adguardhome
-/etc/init.d/adguardhome enable
 rm -f /usr/bin/AdGuardHome
 
 echo "Setup completed!"
