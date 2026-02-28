@@ -1,0 +1,116 @@
+#!/bin/sh /etc/rc.common
+# shellcheck disable=SC2034
+# shellcheck disable=SC3043
+USE_PROCD=1
+
+START=99
+
+. /lib/functions/gl_util.sh
+model=$(get_model)
+
+AGH_RAM_DIR="/tmp/AGH_data"
+AGH_INIT_DIR="/tmp/AGH_init"
+AGH_PERSIST_DIR="/etc/AdGuardHome"
+AGH_CONFIG="$AGH_PERSIST_DIR/config.yaml"
+AGH_RELEASE_TAR="AdGuardHome_linux_arm64.tar.gz"
+AGH_CHECKSUM_FILE="checksums.txt"
+AGH_DOWNLOAD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/$AGH_RELEASE_TAR"
+AGH_CHECKSUM_URL="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/$AGH_CHECKSUM_FILE"
+AGH_RAM_BIN="$AGH_RAM_DIR/AdGuardHome"
+OFFLINE_BLOCKLIST_SOURCE="https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.plus.mini.txt"
+OFFLINE_BLOCKLIST_DEST="/etc/AdGuardHome/offline-blocklist.txt"
+OFFLINE_BLOCKLIST_MAX_AGE_DAYS=28
+
+start_service() {
+    [ "$(uci -q get adguardhome.config.enabled)" = "1" ] || exit 0
+
+    mkdir -p /etc/AdGuardHome
+
+    
+    if ping -c1 github.com >/dev/null 2>&1; then
+
+        mkdir -p "$AGH_INIT_DIR"
+        cd "$AGH_INIT_DIR" || exit 1
+
+        wget -q "$AGH_DOWNLOAD_URL" -O "$AGH_RELEASE_TAR" && \
+        wget -q "$AGH_CHECKSUM_URL" -O "$AGH_CHECKSUM_FILE"
+
+        # Extract only the relevant checksum line
+        CHECK_LINE=$(grep "[[:space:]]\./$AGH_RELEASE_TAR\$" "$AGH_CHECKSUM_FILE")
+        echo "$CHECK_LINE" | sha256sum -c - >/dev/null 2>&1 || {
+            rm -f "$AGH_RELEASE_TAR" "$AGH_CHECKSUM_FILE"
+            wget -q "$AGH_DOWNLOAD_URL" -O "$AGH_RELEASE_TAR" && \
+            wget -q "$AGH_CHECKSUM_URL" -O "$AGH_CHECKSUM_FILE"
+            CHECK_LINE=$(grep "[[:space:]]\./$AGH_RELEASE_TAR\$" "$AGH_CHECKSUM_FILE")
+            echo "$CHECK_LINE" | sha256sum -c - >/dev/null 2>&1 || {
+                exit 1
+            }
+        }
+
+        if [ -f "$AGH_PERSIST_DIR/$AGH_RELEASE_TAR" ]; then
+            # Use same checksum line to verify persistent copy
+            echo "$CHECK_LINE" | sed "s|\./$AGH_RELEASE_TAR|$AGH_PERSIST_DIR/$AGH_RELEASE_TAR|" | sha256sum -c - >/dev/null 2>&1
+            MATCH=$?
+        else
+            MATCH=1
+        fi
+
+        if [ $MATCH -eq 0 ]; then
+            mkdir -p "$AGH_RAM_DIR"
+            tar -xzf "$AGH_RELEASE_TAR" -C "$AGH_RAM_DIR"
+        else
+            rm -f "$AGH_PERSIST_DIR/$AGH_RELEASE_TAR"
+            cp "$AGH_RELEASE_TAR" "$AGH_PERSIST_DIR/"
+            mkdir -p "$AGH_RAM_DIR"
+            tar -xzf "$AGH_RELEASE_TAR" -C "$AGH_RAM_DIR"
+        fi
+
+        rm -rf "$AGH_INIT_DIR"
+        cp /tmp/AGH_data/AdGuardHome/AdGuardHome /tmp/AGH_data/AGH
+        rm -rf /tmp/AGH_data/AdGuardHome
+        mv /tmp/AGH_data/AGH /tmp/AGH_data/AdGuardHome
+        chmod +x "$AGH_RAM_BIN"
+
+        # Offline Blocklist
+        should_download=false
+
+        if [[ ! -f "$OFFLINE_BLOCKLIST_DEST" ]]; then
+            should_download=true
+        elif [[ $(find "$OFFLINE_BLOCKLIST_DEST" -mtime +"$((OFFLINE_BLOCKLIST_MAX_AGE_DAYS - 1))" 2>/dev/null) ]]; then
+            should_download=true
+        fi
+
+        if [[ "$should_download" == true ]]; then
+            mkdir -p "$(dirname "$OFFLINE_BLOCKLIST_DEST")"
+            wget -q "$OFFLINE_BLOCKLIST_SOURCE" -O "$OFFLINE_BLOCKLIST_DEST"
+        fi
+    else
+        mkdir -p "$AGH_RAM_DIR"
+        tar -xzf "$AGH_PERSIST_DIR/$AGH_RELEASE_TAR" -C "$AGH_RAM_DIR"
+        cp /tmp/AGH_data/AdGuardHome/AdGuardHome /tmp/AGH_data/AGH
+        rm -rf /tmp/AGH_data/AdGuardHome
+        mv /tmp/AGH_data/AGH /tmp/AGH_data/AdGuardHome
+        chmod +x "$AGH_RAM_BIN"
+    fi
+
+    #b1300 dose not support mmap,need link the data to tmp fs
+    [ "$model" = "b1300" ] && {
+        rm -rf /etc/AdGuardHome/data 2>/dev/null
+        mkdir -p /tmp/AGH_data
+        ln -s /tmp/AGH_data /etc/AdGuardHome/data
+    }
+
+    /etc/init.d/firewall reload
+
+    procd_open_instance
+    procd_set_param env GOMEMLIMIT=100MiB GOGC=40 GOMAXPROCS=1 # See: https://github.com/AdguardTeam/AdGuardHome/issues/5606#issuecomment-2222746679
+    procd_set_param respawn
+    procd_set_param group explict_vpn
+    procd_set_param stderr 1
+    procd_set_param command "$AGH_RAM_BIN" --glinet --no-check-update -c "$AGH_CONFIG" -w "$AGH_RAM_DIR" -l syslog
+    procd_close_instance
+}
+
+stop_service(){
+    /etc/init.d/firewall reload
+}
