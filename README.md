@@ -1,4 +1,4 @@
-# MT3000
+# lnxsnw/MT3000
 My personal modifications for the **GL.iNet Beryl AX (GL-MT3000) Travel Router**.
 
 > Note: Parts of this project were initially generated with AI assistance but were validated through extensive testing. Uses the manufacturer official files extracted from the router images as the starting point.
