@@ -119,7 +119,7 @@ filters:
     id: 1
   - enabled: true
     url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.plus.txt
-    name: '[WEB] HaGeZi Pro Plus Mini'
+    name: '[WEB] HaGeZi Pro Plus'
     id: 2
 whitelist_filters: []
 user_rules:

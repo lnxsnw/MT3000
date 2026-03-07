@@ -6,13 +6,34 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Copy directories
+# ACTION
 cp -r /tmp/MT3000-main/etc/* /etc/
 chmod +x /etc/init.d/adguardhome
 rm -f /usr/bin/AdGuardHome
 
+# END
 echo "Setup completed!"
-echo "Rebooting in 10 Seconds..."
-echo "CTRL+C to cancel."
-sleep 10
-reboot
+echo "Restart router? (Y/N)"
+echo "This script will restart the router in 5 seconds when no user input is detected..."
+
+if read -r -t 5 -n 1 answer; then
+    case "$answer" in
+        [Yy])
+            echo
+            echo "Restarting..."
+            reboot
+            ;;
+        [Nn])
+            echo
+            echo "Restart cancelled."
+            ;;
+        *)
+            echo
+            echo "Invalid input. Restart cancelled."
+            ;;
+    esac
+else
+    echo
+    echo "No input detected. Restarting..."
+    reboot
+fi
